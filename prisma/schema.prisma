@@ -1,0 +1,98 @@
+// HireLens data model.
+//
+// The Application is the object that matters: it belongs to an Organization and carries the
+// score, the candidate's resume, and private recruiter notes. Every object route enforces that
+// the caller's org owns the Application. That ownership check is the app's security spine.
+//
+// Portability note: skills and the score breakdown are stored as JSON strings (not Prisma `Json`)
+// and stage/role as strings (not enums), because SQLite — used for zero-setup local dev — does not
+// support Prisma enums and treats Json unevenly. Strings map cleanly to Postgres at deploy with no
+// schema change. Shapes are validated in code with zod, so the strings are never trusted blindly.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  users        User[]
+  jobs         Job[]
+  applications Application[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("recruiter") // "recruiter" | "admin"
+  createdAt    DateTime @default(now())
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model Job {
+  id              String   @id @default(cuid())
+  title           String
+  description     String
+  requiredSkills  String   @default("[]") // JSON string: string[]
+  preferredSkills String   @default("[]") // JSON string: string[]
+  minYears        Int      @default(0)
+  education       String? // e.g. "Bachelor's", null = not required
+  isPublic        Boolean  @default(true) // the posting is world-readable by design
+  createdAt       DateTime @default(now())
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  applications Application[]
+
+  @@index([orgId])
+}
+
+model Candidate {
+  id         String   @id @default(cuid())
+  name       String
+  email      String
+  resumeText String
+  createdAt  DateTime @default(now())
+
+  applications Application[]
+}
+
+model Application {
+  id        String   @id @default(cuid())
+  stage     String   @default("applied") // applied | screening | interview | offer | rejected
+  score     Int? // 0-100, null until scored
+  breakdown String? // JSON string of the ScoreBreakdown
+  notes     String   @default("") // private recruiter notes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // orgId is denormalized onto the Application so every ownership check is a single, direct
+  // comparison (caller.orgId === application.orgId) rather than a join through Job on every request.
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([jobId])
+  @@index([candidateId])
+}
