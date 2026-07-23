@@ -3,8 +3,11 @@
 // Supports PDF (the overwhelming majority of résumés), DOCX, and plain text. If we cannot extract
 // real text — most often a SCANNED image PDF with no text layer — we say so honestly and never
 // fabricate a score from nothing. Same discipline as the scorer: no guessing.
-import { PDFParse } from "pdf-parse";
-import mammoth from "mammoth";
+//
+// The PDF/DOCX parsers are imported LAZILY (dynamic import inside the relevant branch), never at
+// module load. pdf-parse pulls in pdfjs, which is heavy and finicky to bundle in serverless
+// functions; loading it only when a PDF is actually uploaded keeps a plain-text upload from ever
+// touching it, and (with serverExternalPackages in next.config) keeps it out of the bundle entirely.
 
 export type ParseResult = { ok: true; text: string } | { ok: false; reason: string };
 
@@ -21,6 +24,7 @@ export async function parseResume(
     let text = "";
 
     if (mimetype === "application/pdf" || name.endsWith(".pdf")) {
+      const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: new Uint8Array(buffer) });
       try {
         const r = await parser.getText();
@@ -32,7 +36,8 @@ export async function parseResume(
       name.endsWith(".docx") ||
       mimetype.includes("officedocument.wordprocessingml")
     ) {
-      const r = await mammoth.extractRawText({ buffer });
+      const { extractRawText } = await import("mammoth");
+      const r = await extractRawText({ buffer });
       text = r.value;
     } else if (mimetype.startsWith("text/") || name.endsWith(".txt")) {
       text = buffer.toString("utf8");
